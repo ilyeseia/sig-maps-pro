@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback, useSyncExternalStore } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useState, useCallback, useSyncExternalStore } from "react";
+import { useParams } from "next/navigation";
 import { useTheme } from "next-themes";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -28,6 +29,8 @@ import {
   Save,
   Download,
   Home,
+  Layers,
+  Settings,
 } from "lucide-react";
 import type { Layer, DrawMode, LayerStyle, Feature, GeoJSONGeometry } from "@/lib/types";
 
@@ -48,6 +51,10 @@ const DrawingTools = dynamic(() => import("@/components/map/DrawingTools"), {
   ssr: false,
 });
 
+const GeoProcessing = dynamic(() => import("@/components/map/GeoProcessing"), {
+  ssr: false,
+});
+
 const sampleLayers: Layer[] = [
   {
     id: "layer-1",
@@ -57,37 +64,15 @@ const sampleLayers: Layer[] = [
     geometryType: "POINT",
     visible: true,
     opacity: 1,
-    style: {
-      color: "#ef4444",
-      pointRadius: 10,
-    },
+    style: { color: "#ef4444", pointRadius: 10 },
     order: 0,
     userId: "user-1",
     features: [
-      {
-        id: "f1",
-        geometry: { type: "Point", coordinates: [3.05, 36.75] },
-        properties: { name: "الجزائر العاصمة", population: 3000000 },
-        layerId: "layer-1",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-      {
-        id: "f2",
-        geometry: { type: "Point", coordinates: [-0.63, 35.70] },
-        properties: { name: "وهران", population: 800000 },
-        layerId: "layer-1",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-      {
-        id: "f3",
-        geometry: { type: "Point", coordinates: [7.75, 36.04] },
-        properties: { name: "قسنطينة", population: 450000 },
-        layerId: "layer-1",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
+      { id: "f1", geometry: { type: "Point", coordinates: [3.05, 36.75] }, properties: { name: "الجزائر العاصمة", population: 3000000 }, layerId: "layer-1", createdAt: new Date(), updatedAt: new Date() },
+      { id: "f2", geometry: { type: "Point", coordinates: [-0.63, 35.70] }, properties: { name: "وهران", population: 800000 }, layerId: "layer-1", createdAt: new Date(), updatedAt: new Date() },
+      { id: "f3", geometry: { type: "Point", coordinates: [7.75, 36.04] }, properties: { name: "قسنطينة", population: 450000 }, layerId: "layer-1", createdAt: new Date(), updatedAt: new Date() },
+      { id: "f4", geometry: { type: "Point", coordinates: [1.88, 36.47] }, properties: { name: "البليدة", population: 250000 }, layerId: "layer-1", createdAt: new Date(), updatedAt: new Date() },
+      { id: "f5", geometry: { type: "Point", coordinates: [6.61, 36.36] }, properties: { name: "سطيف", population: 400000 }, layerId: "layer-1", createdAt: new Date(), updatedAt: new Date() },
     ],
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -100,13 +85,23 @@ const sampleLayers: Layer[] = [
     geometryType: "POLYGON",
     visible: true,
     opacity: 0.6,
-    style: {
-      fillColor: "#3b82f6",
-      fillOpacity: 0.3,
-      lineColor: "#1e40af",
-      lineWidth: 2,
-    },
+    style: { fillColor: "#3b82f6", fillOpacity: 0.3, lineColor: "#1e40af", lineWidth: 2 },
     order: 1,
+    userId: "user-1",
+    features: [],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    id: "layer-3",
+    name: "الطرق الرئيسية",
+    description: "شبكة الطرق الرئيسية",
+    type: "VECTOR",
+    geometryType: "LINESTRING",
+    visible: false,
+    opacity: 1,
+    style: { lineColor: "#22c55e", lineWidth: 3 },
+    order: 2,
     userId: "user-1",
     features: [],
     createdAt: new Date(),
@@ -117,7 +112,11 @@ const sampleLayers: Layer[] = [
 export default function MapViewerPage() {
   const params = useParams();
   const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    useCallback(() => () => {}, []),
+    () => true,
+    () => false
+  );
 
   const [layers, setLayers] = useState<Layer[]>(sampleLayers);
   const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
@@ -133,12 +132,7 @@ export default function MapViewerPage() {
   const [historyIndex, setHistoryIndex] = useState(0);
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [mapName, setMapName] = useState("خريطة جديدة");
-
-  const mounted = useSyncExternalStore(
-    useCallback(() => () => {}, []),
-    () => true,
-    () => false
-  );
+  const [rightPanelTab, setRightPanelTab] = useState("layers");
 
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < history.length - 1;
@@ -198,9 +192,7 @@ export default function MapViewerPage() {
     const newLayers = layers.filter((layer) => layer.id !== id);
     setLayers(newLayers);
     pushToHistory(newLayers);
-    if (activeLayerId === id) {
-      setActiveLayerId(null);
-    }
+    if (activeLayerId === id) setActiveLayerId(null);
   };
 
   const handleMapClick = (lngLat: { lng: number; lat: number }) => {
@@ -210,35 +202,25 @@ export default function MapViewerPage() {
     const activeLayer = layers.find((l) => l.id === activeLayerId);
     if (!activeLayer) return;
 
-    let geometry: GeoJSONGeometry;
-
     if (drawMode === "point") {
-      geometry = { type: "Point", coordinates: [lngLat.lng, lngLat.lat] };
-    } else {
-      return;
+      const newFeature: Feature = {
+        id: `feature-${Date.now()}`,
+        geometry: { type: "Point", coordinates: [lngLat.lng, lngLat.lat] },
+        properties: { name: `عنصر ${activeLayer.features.length + 1}` },
+        layerId: activeLayerId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const newLayers = layers.map((layer) =>
+        layer.id === activeLayerId ? { ...layer, features: [...layer.features, newFeature] } : layer
+      );
+      setLayers(newLayers);
+      pushToHistory(newLayers);
     }
-
-    const newFeature: Feature = {
-      id: `feature-${Date.now()}`,
-      geometry,
-      properties: { name: `عنصر ${activeLayer.features.length + 1}` },
-      layerId: activeLayerId,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-
-    const newLayers = layers.map((layer) =>
-      layer.id === activeLayerId
-        ? { ...layer, features: [...layer.features, newFeature] }
-        : layer
-    );
-    setLayers(newLayers);
-    pushToHistory(newLayers);
   };
 
-  const handleSave = () => {
-    setIsSaveDialogOpen(true);
-  };
+  const handleSave = () => setIsSaveDialogOpen(true);
 
   const handleExport = () => {
     const geojson = {
@@ -252,10 +234,7 @@ export default function MapViewerPage() {
         }))
       ),
     };
-
-    const blob = new Blob([JSON.stringify(geojson, null, 2)], {
-      type: "application/json",
-    });
+    const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -272,6 +251,10 @@ export default function MapViewerPage() {
       setLayers(newLayers);
       pushToHistory(newLayers);
     }
+  };
+
+  const handleGeoProcess = (type: string, params: Record<string, unknown>) => {
+    console.log("GeoProcessing:", type, params);
   };
 
   return (
@@ -292,11 +275,7 @@ export default function MapViewerPage() {
 
         <div className="flex items-center gap-2">
           {mounted && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            >
+            <Button variant="ghost" size="icon" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
           )}
@@ -329,7 +308,6 @@ export default function MapViewerPage() {
 
       {/* Main Content */}
       <ResizablePanelGroup direction="horizontal" className="flex-1">
-        {/* Map View */}
         <ResizablePanel defaultSize={75} minSize={50}>
           <MapViewer
             center={[3.05, 36.75]}
@@ -343,16 +321,37 @@ export default function MapViewerPage() {
 
         <ResizableHandle withHandle />
 
-        {/* Layer Control */}
         <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
-          <LayerControl
-            layers={layers}
-            onLayersChange={setLayers}
-            onAddLayer={handleAddLayer}
-            onUpdateLayer={handleUpdateLayer}
-            onDeleteLayer={handleDeleteLayer}
-            className="h-full rounded-none border-0"
-          />
+          <Tabs value={rightPanelTab} onValueChange={setRightPanelTab} className="h-full flex flex-col">
+            <TabsList className="grid grid-cols-2 mx-2 mt-2">
+              <TabsTrigger value="layers" className="gap-1">
+                <Layers className="h-4 w-4" />
+                الطبقات
+              </TabsTrigger>
+              <TabsTrigger value="tools" className="gap-1">
+                <Settings className="h-4 w-4" />
+                الأدوات
+              </TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="layers" className="flex-1 mt-0">
+              <LayerControl
+                layers={layers}
+                onLayersChange={setLayers}
+                onAddLayer={handleAddLayer}
+                onUpdateLayer={handleUpdateLayer}
+                onDeleteLayer={handleDeleteLayer}
+                className="h-full rounded-none border-0"
+              />
+            </TabsContent>
+            
+            <TabsContent value="tools" className="flex-1 mt-0 overflow-auto p-2">
+              <GeoProcessing
+                layers={layers}
+                onProcess={handleGeoProcess}
+              />
+            </TabsContent>
+          </Tabs>
         </ResizablePanel>
       </ResizablePanelGroup>
 
@@ -361,9 +360,7 @@ export default function MapViewerPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>حفظ الخريطة</DialogTitle>
-            <DialogDescription>
-              أدخل اسم الخريطة لحفظها
-            </DialogDescription>
+            <DialogDescription>أدخل اسم الخريطة لحفظها</DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <Label htmlFor="mapName">اسم الخريطة</Label>
@@ -376,12 +373,8 @@ export default function MapViewerPage() {
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsSaveDialogOpen(false)}>
-              إلغاء
-            </Button>
-            <Button onClick={() => setIsSaveDialogOpen(false)}>
-              حفظ
-            </Button>
+            <Button variant="outline" onClick={() => setIsSaveDialogOpen(false)}>إلغاء</Button>
+            <Button onClick={() => setIsSaveDialogOpen(false)}>حفظ</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
