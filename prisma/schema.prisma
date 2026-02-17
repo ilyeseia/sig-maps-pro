@@ -10,22 +10,36 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ==================== USER & AUTH ====================
+
 model User {
-  id           String     @id @default(cuid())
-  email        String     @unique
-  username     String     @unique
+  id           String       @id @default(cuid())
+  email        String       @unique
+  username     String       @unique
   password     String
   firstName    String?
   lastName     String?
-  role         Role       @default(USER)
+  role         Role         @default(USER)
   organization String?
   avatar       String?
-  isActive     Boolean    @default(true)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  isActive     Boolean      @default(true)
+  isVerified   Boolean      @default(false)
+  preferences  String?      // JSON string for user preferences
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  lastLoginAt  DateTime?
+  
+  // Relations
   maps         Map[]
   layers       Layer[]
   activities   Activity[]
+  notifications Notification[]
+  shares       Share[]
+  
+  @@index([email])
+  @@index([username])
+  @@index([role])
+  @@index([createdAt])
 }
 
 enum Role {
@@ -34,21 +48,37 @@ enum Role {
   SUPER_ADMIN
 }
 
+// ==================== MAPS ====================
+
 model Map {
-  id          String     @id @default(cuid())
+  id          String      @id @default(cuid())
   name        String
+  slug        String?     @unique
   description String?
-  centerLat   Float      @default(24.7136)
-  centerLng   Float      @default(46.6753)
-  zoom        Float      @default(4.0)
-  baseMap     BaseMap    @default(OSM)
-  isPublic    Boolean    @default(false)
+  centerLat   Float       @default(24.7136)
+  centerLng   Float       @default(46.6753)
+  zoom        Float       @default(4.0)
+  minZoom     Int         @default(0)
+  maxZoom     Int         @default(22)
+  baseMap     BaseMap     @default(OSM)
+  isPublic    Boolean     @default(false)
+  isPublished Boolean     @default(false)
   thumbnail   String?
+  settings    String?     // JSON string for map settings
+  viewCount   Int         @default(0)
+  
+  // Relations
   userId      String
-  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   layers      Layer[]
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([userId])
+  @@index([isPublic])
+  @@index([createdAt])
+  @@index([name])
 }
 
 enum BaseMap {
@@ -58,9 +88,12 @@ enum BaseMap {
   TERRAIN
 }
 
+// ==================== LAYERS ====================
+
 model Layer {
   id           String       @id @default(cuid())
   name         String
+  slug         String?      @unique
   description  String?
   type         LayerType    @default(VECTOR)
   geometryType GeometryType?
@@ -68,16 +101,30 @@ model Layer {
   opacity      Float        @default(1.0)
   style        String?      // JSON string for layer style
   order        Int          @default(0)
+  minZoom      Int          @default(0)
+  maxZoom      Int          @default(22)
+  metadata     String?      // JSON string for metadata
+  tags         String?      // Comma-separated tags
+  featureCount Int          @default(0)
+  
+  // Relations
   mapId        String?
   map          Map?         @relation(fields: [mapId], references: [id], onDelete: Cascade)
   userId       String
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   features     Feature[]
+  fields       Field[]
+  
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
   @@index([mapId])
   @@index([userId])
+  @@index([type])
+  @@index([geometryType])
+  @@index([visible])
+  @@index([order])
+  @@index([name])
 }
 
 enum LayerType {
@@ -96,25 +143,182 @@ enum GeometryType {
   MULTIPOLYGON
 }
 
-model Feature {
-  id         String   @id @default(cuid())
-  geometry   String   // GeoJSON geometry as JSON string
-  properties String?  // JSON string for properties
-  layerId    String
-  layer      Layer    @relation(fields: [layerId], references: [id], onDelete: Cascade)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+// ==================== FIELDS ====================
 
+model Field {
+  id              String      @id @default(cuid())
+  name            String
+  slug            String
+  type            FieldType
+  required        Boolean     @default(false)
+  uniqueField     Boolean     @default(false)
+  defaultValue    String?
+  validationRules String?     // JSON string
+  displayOrder    Int         @default(0)
+  isVisible       Boolean     @default(true)
+  isFilterable    Boolean     @default(true)
+  
+  // Relations
+  layerId         String
+  layer           Layer       @relation(fields: [layerId], references: [id], onDelete: Cascade)
+  
+  createdAt       DateTime    @default(now())
+
+  @@unique([layerId, slug])
   @@index([layerId])
 }
 
+enum FieldType {
+  TEXT
+  NUMBER
+  DATE
+  BOOLEAN
+  SELECT
+  MULTISELECT
+  IMAGE
+  URL
+  EMAIL
+  PHONE
+}
+
+// ==================== FEATURES ====================
+
+model Feature {
+  id             String   @id @default(cuid())
+  geometry       String   // GeoJSON geometry as JSON string
+  properties     String?  // JSON string for properties
+  styleOverrides String?  // JSON string for style overrides
+  
+  // Audit
+  createdBy      String?
+  updatedBy      String?
+  
+  // Relations
+  layerId        String
+  layer          Layer    @relation(fields: [layerId], references: [id], onDelete: Cascade)
+  
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  @@index([layerId])
+  @@index([createdAt])
+}
+
+// ==================== SHARING ====================
+
+model Share {
+  id             String      @id @default(cuid())
+  type           ShareType
+  permission     Permission  @default(VIEW)
+  shareToken     String?     @unique
+  expiresAt      DateTime?
+  
+  // Polymorphic relation (stored as strings, not actual relations)
+  entityType     String      // 'MAP' or 'LAYER'
+  entityId       String
+  
+  // Who it's shared with
+  sharedWithId   String?     // User ID or Group ID
+  
+  // Relations
+  userId         String?
+  user           User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdBy      String?
+  createdAt      DateTime    @default(now())
+
+  @@index([entityType, entityId])
+  @@index([shareToken])
+  @@index([userId])
+}
+
+enum ShareType {
+  USER
+  GROUP
+  ORGANIZATION
+  PUBLIC_LINK
+}
+
+enum Permission {
+  VIEW
+  EDIT
+  ADMIN
+}
+
+// ==================== ACTIVITY LOG ====================
+
 model Activity {
-  id        String   @id @default(cuid())
-  action    String
-  details   String?
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
+  id         String   @id @default(cuid())
+  action     String   // CREATE, UPDATE, DELETE, VIEW, SHARE
+  entityType String   // MAP, LAYER, FEATURE, USER
+  entityId   String?
+  details    String?  // JSON string
+  changes    String?  // JSON string for before/after
+  
+  // Relations
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
 
   @@index([userId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ==================== NOTIFICATIONS ====================
+
+model Notification {
+  id        String   @id @default(cuid())
+  type      String   // Notification type
+  title     String
+  message   String?
+  data      String?  // JSON string
+  isRead    Boolean  @default(false)
+  
+  // Relations
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+}
+
+// ==================== GEO JOBS ====================
+
+model GeoJob {
+  id            String      @id @default(cuid())
+  name          String
+  type          String      // BUFFER, INTERSECTION, UNION, etc.
+  status        JobStatus   @default(PENDING)
+  parameters    String      // JSON string
+  result        String?     // JSON string
+  errorMessage  String?
+  progress      Int         @default(0)
+  
+  inputLayerIds String?     // JSON array
+  outputLayerId String?
+  
+  createdBy     String?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime    @default(now())
+
+  @@index([status])
+  @@index([createdBy])
+  @@index([createdAt])
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
 }
