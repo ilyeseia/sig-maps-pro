@@ -1,0 +1,120 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  username     String     @unique
+  password     String
+  firstName    String?
+  lastName     String?
+  role         Role       @default(USER)
+  organization String?
+  avatar       String?
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  maps         Map[]
+  layers       Layer[]
+  activities   Activity[]
+}
+
+enum Role {
+  USER
+  ADMIN
+  SUPER_ADMIN
+}
+
+model Map {
+  id          String     @id @default(cuid())
+  name        String
+  description String?
+  centerLat   Float      @default(24.7136)
+  centerLng   Float      @default(46.6753)
+  zoom        Float      @default(4.0)
+  baseMap     BaseMap    @default(OSM)
+  isPublic    Boolean    @default(false)
+  thumbnail   String?
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  layers      Layer[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+enum BaseMap {
+  OSM
+  SATELLITE
+  DARK
+  TERRAIN
+}
+
+model Layer {
+  id           String       @id @default(cuid())
+  name         String
+  description  String?
+  type         LayerType    @default(VECTOR)
+  geometryType GeometryType?
+  visible      Boolean      @default(true)
+  opacity      Float        @default(1.0)
+  style        String?      // JSON string for layer style
+  order        Int          @default(0)
+  mapId        String?
+  map          Map?         @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  features     Feature[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@index([mapId])
+  @@index([userId])
+}
+
+enum LayerType {
+  VECTOR
+  RASTER
+  WMS
+  TILE
+}
+
+enum GeometryType {
+  POINT
+  LINESTRING
+  POLYGON
+  MULTIPOINT
+  MULTILINESTRING
+  MULTIPOLYGON
+}
+
+model Feature {
+  id         String   @id @default(cuid())
+  geometry   String   // GeoJSON geometry as JSON string
+  properties String?  // JSON string for properties
+  layerId    String
+  layer      Layer    @relation(fields: [layerId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([layerId])
+}
+
+model Activity {
+  id        String   @id @default(cuid())
+  action    String
+  details   String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
